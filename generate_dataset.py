@@ -4,6 +4,7 @@
 
     python3 generate_dataset.py                      # asks for each setting (Enter keeps the default)
     python3 generate_dataset.py -n 500 -s 400 -o ~/COCOSubset      # no questions
+    python3 generate_dataset.py -n 2000 --split trainval -o ~/COCOProtocol -y   # the protocol's pool
     python3 generate_dataset.py --help
 
 Ctrl+C cancels cleanly: images already saved are kept, with their labels.
@@ -24,17 +25,18 @@ def build_parser():
                                             "(short side, one object covering 1-20%, EXIF orientation 1, no duplicates).")
     p.add_argument("-n", "--n-images", help=f"number of images (1-{dc.MAX_IMAGES}, default {DEFAULTS['n_images']})")
     p.add_argument("-s", "--min-short-side", help=f"minimum short side in px (1-{dc.MAX_SHORT_SIDE}, default {DEFAULTS['min_short_side']})")
-    p.add_argument("--split", choices=dc.SPLITS, help="COCO 2017 split (default val)")
+    p.add_argument("--split", choices=dc.SPLITS,
+                   help="COCO 2017 pool: val, train, or trainval = train + val, the protocol's pool (default val)")
     p.add_argument("--seed", help=f"random seed (default {DEFAULTS['seed']})")
     p.add_argument("-o", "--out-dir", help=f"output folder (default {DEFAULTS['out_dir']})")
-    p.add_argument("-y", "--yes", action="store_true", help="do not ask for confirmation (train split)")
+    p.add_argument("-y", "--yes", action="store_true", help="do not ask for confirmation (train or trainval)")
     return p
 
 
 def ask_settings(input_fn, out):
     """Prompt for every setting; ask again until the answer is valid (Enter keeps the default)."""
     prompts = [("n_images", "Number of images"), ("min_short_side", "Minimum short side (px)"),
-               ("split", "COCO split (val/train)"), ("seed", "Seed"), ("out_dir", "Output folder")]
+               ("split", "COCO split (val/train/trainval)"), ("seed", "Seed"), ("out_dir", "Output folder")]
     answers = {}
     for key, label in prompts:
         while True:
@@ -94,14 +96,15 @@ def main(argv=None, input_fn=input, out=None, job_kwargs=None, interactive=None)
     if images.exists() and any(images.iterdir()):
         print(f"Error: {images} already has files. Choose a new or empty output folder.", file=out)
         return 1
-    if settings.split == "train" and not args.yes:
+    if settings.split in ("train", "trainval") and not args.yes:
         reply = input_fn("The train annotations are large (about 450 MB unpacked, several GB of RAM). Continue? [y/N]: ")
         if reply.strip().lower() not in ("y", "yes"):
             print("Cancelled.", file=out)
             return 130
     print(f"Downloading {settings.n_images} images (short side >= {settings.min_short_side} px, "
           f"split {settings.split}, seed {settings.seed}) into {settings.out_dir}", file=out)
-    if not (settings.out_dir / "annotations" / f"instances_{settings.split}2017.json").exists():
+    if not all((settings.out_dir / "annotations" / f"instances_{p}2017.json").exists()
+               for p in dc.split_parts(settings.split)):
         print("First run: the COCO annotations (about 250 MB) are downloaded once and reused. Ctrl+C cancels.", file=out)
 
     job, display, result, interrupted = dc.Job(settings, **(job_kwargs or {})), Display(out), None, False
@@ -131,6 +134,8 @@ def main(argv=None, input_fn=input, out=None, job_kwargs=None, interactive=None)
         print(f"  skipped {n}: {reason}", file=out)
     word = "Cancelled" if result.cancelled else "Done"
     print(f"{word}: saved {result.saved} of {result.requested} images (examined {result.examined}) in {result.out_dir}", file=out)
+    print(f"Settings, checksums and versions: {result.out_dir / 'run_metadata.json'}; "
+          f"per-image checksums: {result.out_dir / 'images_manifest.csv'}", file=out)
     if result.shortfall:
         print("Fewer images met the criteria than requested. Try a lower short side or --split train.", file=out)
     return 130 if result.cancelled else 0

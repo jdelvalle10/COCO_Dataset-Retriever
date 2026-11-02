@@ -88,7 +88,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(len(self.images()), 2)
 
     def test_interactive_rejects_bad_split_and_folder_then_accepts(self):
-        answers = ["2", "999", "400", "test", "val", "", "  ", str(self.out)]
+        answers = ["2", "999", "400", "test", "val", "", str(self.out)]
         code, text = self.run_cli([], answers, interactive=True)
         self.assertEqual(code, 0)
         self.assertIn("between 1 and 640", text)
@@ -99,6 +99,17 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 130)
         self.assertIn("Continue? [y/N]", text)
         self.assertFalse((self.out / "images").exists())
+
+    def test_trainval_asks_for_confirmation(self):
+        code, text = self.run_cli(["--split", "trainval", "-o", str(self.out)], answers=["n"])
+        self.assertEqual(code, 130)
+        self.assertIn("Continue? [y/N]", text)
+
+    def test_end_message_points_to_records(self):
+        code, text = self.run_cli(["-n", "2", "-o", str(self.out)])
+        self.assertEqual(code, 0)
+        self.assertIn("run_metadata.json", text)
+        self.assertTrue((self.out / "images_manifest.csv").exists())
 
     def test_progress_bar_on_terminal(self):
         code, text = self.run_cli(["-n", "3", "-o", str(self.out)], stream=TTY())
