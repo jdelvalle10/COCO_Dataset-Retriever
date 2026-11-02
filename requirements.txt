@@ -1,3 +1,4 @@
-pycocotools
-pillow
-numpy
+# Exact versions tested (CPython 3.13). Prebuilt macOS arm64 wheels exist for each.
+numpy==2.5.3
+pillow==12.3.0
+pycocotools==2.0.11

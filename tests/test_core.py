@@ -4,6 +4,7 @@
     python3 -m unittest discover -s tests -v
 """
 import csv
+import hashlib
 import io
 import json
 import sys
@@ -236,6 +237,118 @@ class GenerateTests(unittest.TestCase):
         img = [e for e in events if e[0] == "images"]
         self.assertEqual([e[1] for e in img], [1, 2, 3])
         self.assertTrue(all(e[2] == 3 for e in img))
+
+
+class RecordTests(unittest.TestCase):
+    """run_metadata.json and images_manifest.csv: settings, checksums and versions of every run."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.out = Path(self.tmp.name) / "out"
+        self.fetch, _ = build_world(self.out)
+        self.res = dc.generate(dc.Settings(out_dir=self.out, n_images=4, seed=11), fetch=self.fetch)
+        self.meta = json.loads((self.out / "run_metadata.json").read_text())
+        with open(self.out / "images_manifest.csv") as f:
+            self.rows = list(csv.DictReader(f))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_settings_recorded(self):
+        s = self.meta["settings"]
+        self.assertEqual((s["n_images"], s["seed"], s["split"], s["min_short_side"]), (4, 11, "val", 400))
+        self.assertEqual((s["area_min"], s["area_max"]), (0.01, 0.20))
+        self.assertEqual(self.meta["pool"], ["val2017"])
+        self.assertEqual(self.meta["result"]["saved"], self.res.saved)
+        self.assertEqual(self.meta["result"]["examined"], self.res.examined)
+
+    def test_checksums_match_files(self):
+        ann = self.out / "annotations" / "instances_val2017.json"
+        self.assertEqual(self.meta["annotations"]["sha256"], {ann.name: dc.sha256_file(ann)})
+        for name, digest in self.meta["outputs_sha256"].items():
+            self.assertEqual(dc.sha256_file(self.out / name), digest, name)
+        self.assertEqual(set(self.meta["scripts_sha256"]), {"dataset_core.py", "generate_dataset.py"})
+
+    def test_environment_recorded(self):
+        env = self.meta["environment"]
+        self.assertTrue(env["python"] and env["platform"])
+        self.assertEqual(set(env["packages"]), {"numpy", "pillow", "pycocotools"})
+
+    def test_manifest_one_row_per_saved_image_with_true_hashes(self):
+        self.assertEqual(len(self.rows), self.res.saved)
+        self.assertEqual([int(r["order"]) for r in self.rows], list(range(self.res.saved)))
+        for r in self.rows:
+            data = (self.out / "images" / r["file_name"]).read_bytes()
+            self.assertEqual(hashlib.sha256(data).hexdigest(), r["bytes_sha256"])
+            self.assertEqual(r["split"], "val")
+            self.assertGreaterEqual(int(r["objects_in_range"]), 1)
+
+    def test_cancelled_run_still_records(self):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t) / "out"
+            fetch, _ = build_world(out)
+            ev = threading.Event()
+            ev.set()
+            dc.generate(dc.Settings(out_dir=out, n_images=3), cancel=ev, fetch=fetch)
+            meta = json.loads((out / "run_metadata.json").read_text())
+            self.assertTrue(meta["result"]["cancelled"])
+
+
+def build_trainval(root):
+    """Split the synthetic world into train (ids 1-7) and val (ids 8-14) annotation files."""
+    fetch, calls = build_world(root)
+    ann_dir = Path(root) / "annotations"
+    data = json.loads((ann_dir / "instances_val2017.json").read_text())
+    for part, keep in (("train", range(1, 8)), ("val", range(8, 15))):
+        sub = {"images": [i for i in data["images"] if i["id"] in keep],
+               "annotations": [a for a in data["annotations"] if a["image_id"] in keep],
+               "categories": data["categories"]}
+        (ann_dir / f"instances_{part}2017.json").write_text(json.dumps(sub))
+    return fetch, calls
+
+
+class TrainValTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.out = Path(self.tmp.name) / "out"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_pool_draws_from_both_splits(self):
+        fetch, _ = build_trainval(self.out)
+        r = dc.generate(dc.Settings(out_dir=self.out, n_images=100, split="trainval"), fetch=fetch)
+        self.assertEqual(r.saved, len(GOOD))          # same rules, same survivors as the single file
+        self.assertEqual(r.examined, len(SPEC))
+        with open(self.out / "images_manifest.csv") as f:
+            split = {int(row["id"]): row["split"] for row in csv.DictReader(f)}
+        self.assertEqual({i for i, s in split.items() if s == "train"} | {i for i, s in split.items() if s == "val"},
+                         set(split))
+        self.assertTrue(any(s == "train" for s in split.values()) and any(s == "val" for s in split.values()))
+        for i, s in split.items():
+            self.assertEqual(s, "train" if i < 8 else "val")
+        meta = json.loads((self.out / "run_metadata.json").read_text())
+        self.assertEqual(meta["pool"], ["train2017", "val2017"])
+        self.assertEqual(set(meta["annotations"]["sha256"]), {"instances_train2017.json", "instances_val2017.json"})
+
+    def test_overlapping_ids_are_refused(self):
+        fetch, _ = build_world(self.out)
+        ann_dir = self.out / "annotations"
+        (ann_dir / "instances_train2017.json").write_text((ann_dir / "instances_val2017.json").read_text())
+        with self.assertRaises(ValueError):
+            dc.generate(dc.Settings(out_dir=self.out, n_images=3, split="trainval"), fetch=fetch)
+
+    def test_one_zip_download_extracts_both_files(self):
+        z = Path(self.tmp.name) / "ann.zip"
+        with zipfile.ZipFile(z, "w") as zf:
+            zf.writestr("annotations/instances_train2017.json", '{"t": 1}')
+            zf.writestr("annotations/instances_val2017.json", '{"v": 1}')
+        paths = dc.download_annotation_files(self.out, ["train", "val"], url=z.as_uri())
+        self.assertEqual([p.read_text() for p in paths], ['{"t": 1}', '{"v": 1}'])
+
+    def test_parse_accepts_trainval(self):
+        s = dc.parse_settings(out_dir="/tmp/x", n_images="5", min_short_side="400", split="trainval")
+        self.assertEqual(s.split, "trainval")
 
 
 class AnnotationDownloadTests(unittest.TestCase):
