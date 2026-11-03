@@ -1,4 +1,4 @@
-# Distance vs. Accuracy of Perceptual Hashes: Experiment Protocol
+# Hamming Distance vs. Tampering Detection Accuracy of Perceptual Hashes: Experiment Protocol
 
 Version 3 · 3 November 2026 · Jose Luis del Valle
 
