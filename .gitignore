@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.part
+# generated data never belongs in the repository
+images/
+labels/
+annotations/
+*.jpg
+selection_log.csv
+images_manifest.csv
+classes.txt
+run_metadata.json
