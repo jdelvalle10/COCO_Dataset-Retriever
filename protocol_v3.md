@@ -167,10 +167,10 @@ Each step group is carried out by one script that reads only the output of the s
 | 1 | Criteria table: thresholds and error rates used in the literature, to justify α and β | Document | Open |
 | 2 | Pre-register: research questions, decision rule, metrics, α and β, the undefined-τ_low rule, the partition rule, number of originals, master seed | This protocol | Done |
 | **B. Build the dataset** | | | |
-| 3 | Select 2,000 originals from COCO train2017 + val2017 | P1S1 | Published, piloted |
-| 4 | Partition: 1,000 calibration / 1,000 test, per original, seeded | P1S2 | Published, piloted |
-| 5 | Catalogues: 24 benign and 15 content-altering cells | P1S2 | Published, piloted |
-| 6 | Generate and store every copy; record type, strength, mask area, seed, checksum | P1S2 | Published, piloted |
+| 3 | Select 2,000 originals from COCO train2017 + val2017 | P1S1 | Published, piloted, run on 2,000 originals |
+| 4 | Partition: 1,000 calibration / 1,000 test, per original, seeded | P1S2 | Published, piloted, run on 2,000 originals |
+| 5 | Catalogues: 24 benign and 15 content-altering cells | P1S2 | Published, piloted, run on 2,000 originals |
+| 6 | Generate and store every copy; record type, strength, mask area, seed, checksum | P1S2 | Published, piloted, run on 2,000 originals |
 | 7 | Visual QA: contact sheets for 50 random originals, inspected by the researcher; findings recorded | P1S2 (sheets) + researcher | Sheets published; inspection open |
 | **C. Hash and measure** | | | |
 | 8 | Hash every original and copy with the four hashes | Hashing script | Not yet published |
@@ -302,10 +302,10 @@ Equal weight per cell keeps a common change from dominating and makes small 1–
 
 ## 8. Software, records and reproducibility
 
-| Script | Repository | Version | Steps | Tests |
-| --- | --- | --- | --- | --- |
-| P1S1 | [P1S1_COCO_Dataset_Retriever](https://github.com/jdelvalle10/P1S1_COCO_Dataset_Retriever) | 1.1.0 | 3 | 49, offline |
-| P1S2 | [P1S2_Copy_Generator](https://github.com/jdelvalle10/P1S2_Copy_Generator) | 2.1.0 | 4–7 | 8, offline |
+| Script | Repository | Version (tag) | Commit used for the full run | Steps | Tests |
+| --- | --- | --- | --- | --- | --- |
+| P1S1 | [P1S1_COCO_Dataset_Retriever](https://github.com/jdelvalle10/P1S1_COCO_Dataset_Retriever) | 1.1.0 (`v1.1.0`) | `96e21ba` | 3 | 49, offline |
+| P1S2 | [P1S2_Copy_Generator](https://github.com/jdelvalle10/P1S2_Copy_Generator) | 2.1.0 (`v2.1.0`) | `13a690b` | 4–7 | 8, offline |
 
 Both are open source under the MIT License.
 
@@ -337,6 +337,27 @@ python3 P1S2_Copy_Generator/generate_copies.py --in ./originals --out ./copies
 - Each script checks the checksums written by the previous one and stops on any mismatch.
 - P1S2's output does not depend on the number of worker processes, and an interrupted run resumes to identical output.
 - On another machine or library version, JPEG/WebP codecs and OpenCV may produce slightly different pixels; this has not been measured. The recorded checksums and versions make any difference detectable and traceable, and the analysis always uses the stored files.
+
+**Reference environment.** Every step of the experiment, from the full run of steps 3–7 onwards, runs in a single environment:
+
+| Item | Value |
+| --- | --- |
+| Hardware | Mac Pro, Intel Xeon W-3245 (3.2 GHz, 32 logical cores), 32 GB RAM |
+| Operating system | macOS 26.7.1, x86_64 |
+| Python | CPython 3.12.0 |
+| Packages | numpy 2.5.3, Pillow 12.3.0 (libjpeg-turbo, libwebp 1.6.0), opencv-python-headless 5.0.0.93, pycocotools 2.0.11 |
+
+The pilot (section 9) ran on a different machine (Apple silicon, Python 3.12.16); its files are not part of the experiment's data.
+
+**Full run of steps 3–7** (5 November 2026, reference environment, both scripts at the commits above, no failures)
+
+- **Selection (step 3):** 2,866 images examined to keep 2,000 (69.8%): 539 rejected for a short side under 400 px, 327 for no object covering 1–20%. Of the 2,000 originals, 1,932 come from train2017 and 68 from val2017.
+- **Partition (step 4):** 1,000 calibration and 1,000 test originals.
+- **Copies (steps 5–6):** 72,933 of 78,000 cells written. All 48,000 benign copies and all 10,000 splices were made. 5,067 cells (6.5%) are not applicable: 4,427 removal cells (no object of a suitable size) and 640 copy-move cells (no non-overlapping placement in 30 attempts), 543 of them at 20%.
+- **Integrity:** SHA-256 recomputed for all 2,000 JPEGs, all 2,000 PNG references and all 72,933 copies against the manifests: no mismatch, none missing, no unlisted file.
+- **Processing time:** 572 s for step 3, limited by downloads; 371 s for steps 4–7 with 32 worker processes.
+- **Disk:** 0.8 GB for step 3 and 36 GB for steps 4–7.
+- **QA sheets (step 7):** 50 contact sheets written; the visual inspection is still open.
 
 ## 9. Pilot results
 
@@ -379,6 +400,6 @@ The lower threshold was undefined for all four hashes, mostly because of 1–2% 
 - [ ] Criteria table from the literature (step 1).
 - [ ] Minimum number of observations for a cell to be analysed rather than only described.
 - [ ] Visual inspection of 50 contact sheets (step 7).
-- [ ] Full run of steps 3–7 on 2,000 originals.
+- [x] Full run of steps 3–7 on 2,000 originals (5 November 2026; section 8).
 - [ ] Hashing script (steps 8–10) and analysis scripts (steps 11–20).
 - [ ] A later study varying the error targets α and β.
